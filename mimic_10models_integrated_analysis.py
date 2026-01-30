@@ -52,40 +52,37 @@ def run_comprehensive_analysis(input_file, exclude_cols, target_col,
 
     # 2. 전체 모델 후보군 및 하이퍼파라미터 정의
     full_model_dict = {
-        'LR': (LogisticRegression(max_iter=5000),
-               {'clf__C': [1]}),
-        'RF': (RandomForestClassifier(random_state=42),
-               {'clf__n_estimators': [300], 'clf__max_depth': [20]}),
-        'DT': (DecisionTreeClassifier(random_state=42),
-               {'clf__max_depth': [5], 'clf__min_samples_leaf': [4]}),
-        'KNN': (KNeighborsClassifier(),
-                {'clf__n_neighbors': [21], 'clf__weights': ['distance']}),
+        'LR': (LogisticRegression(max_iter=5000, class_weight=None), {'clf__C': [0.1, 1, 10, 100]}),
+        'RF': (RandomForestClassifier(random_state=42), {'clf__n_estimators': [100, 300], 'clf__max_depth': [10, 20, None]}),
+        'DT': (DecisionTreeClassifier(random_state=42, class_weight=None),
+               {'clf__max_depth': [5, 10, 15], 'clf__min_samples_leaf': [1, 2, 4]}),
+        'KNN': (KNeighborsClassifier(), {'clf__n_neighbors': [5, 11, 21], 'clf__weights': ['uniform', 'distance']}),
         'MLP': (MLPClassifier(max_iter=1000, random_state=42),
-                {'clf__hidden_layer_sizes': [(100,)], 'clf__alpha': [0.0001]}),
-        'AdaBoost': (AdaBoostClassifier(random_state=42),
-                     {'clf__n_estimators': [100], 'clf__learning_rate': [1.0]}),
-        'SVM': (SVC(probability=True, random_state=42),
-                {'clf__C': [1], 'clf__gamma': ['scale']}),
+                {'clf__hidden_layer_sizes': [(50,), (100,)], 'clf__alpha': [0.0001, 0.05]}),
+        'AdaBoost': (
+            AdaBoostClassifier(random_state=42),
+            {'clf__n_estimators': [50, 100], 'clf__learning_rate': [0.01, 0.1, 1.0]}),
+        'SVM': (SVC(probability=True, random_state=42), {'clf__C': [0.1, 1, 10], 'clf__gamma': ['scale', 'auto']}),
         'XGBoost': (XGBClassifier(random_state=42, eval_metric='logloss'),
                     {
-                        'clf__n_estimators': [500],  # 더 많이 학습
-                        'clf__learning_rate': [0.01],  # 학습률을 낮춰 정밀도 향상
-                        'clf__max_depth': [5],  # 복잡도를 살짝 올림
-                        'clf__min_child_weight': [5],  # 과적합 방지용 (중요)
-                        'clf__subsample': [0.8]  # 데이터 샘플링 비율
+                        'clf__n_estimators': [300, 500, 1000],  # 더 많이 학습
+                        'clf__learning_rate': [0.01, 0.05, 0.1],  # 학습률을 낮춰 정밀도 향상
+                        'clf__max_depth': [3, 4, 5],  # 복잡도를 살짝 올림
+                        'clf__min_child_weight': [1, 3, 5],  # 과적합 방지용 (중요)
+                        'clf__subsample': [0.8, 1.0]  # 데이터 샘플링 비율
                     }
                     ),
         'LightGBM': (LGBMClassifier(random_state=42),
                      {
-                         'clf__n_estimators': [500],  # 현재 300이 부족해 보임
-                         'clf__learning_rate': [0.005],  # 더 잘게 쪼개서 학습
-                         'clf__num_leaves': [63],  # 트리 노드 개수를 늘려 복잡한 패턴 학습
-                         'clf__feature_fraction': [0.8],  # 변수 샘플링 (과적합 방지)
-                         'clf__min_child_samples': [30]  # 리프 노드의 최소 데이터 수
+                         'clf__n_estimators': [500, 1000],
+                         'clf__learning_rate': [0.005, 0.01, 0.05],  # 더 잘게 쪼개서 학습
+                         'clf__num_leaves': [31, 63, 127],  # 트리 노드 개수를 늘려 복잡한 패턴 학습
+                         'clf__feature_fraction': [0.8, 0.9, 1.0],  # 변수 샘플링 (과적합 방지)
+                         'clf__min_child_samples': [20, 30]  # 리프 노드의 최소 데이터 수
                      }
                      ),
         'CatBoost': (CatBoostClassifier(random_state=42, verbose=0),
-                     {'clf__iterations': [300], 'clf__depth': [4], 'clf__learning_rate': [0.1]})
+                     {'clf__iterations': [100, 300], 'clf__depth': [4, 6], 'clf__learning_rate': [0.01, 0.1]})
     }
 
     # 모델 필터링
@@ -206,56 +203,73 @@ def run_comprehensive_analysis(input_file, exclude_cols, target_col,
 
 def run_shap_analysis(model, X_test, model_name):
     """
-    최적 모델에 대한 SHAP Feature Importance 시각화
+    최적 모델에 대한 SHAP 가중치 분석 시각화 (Beeswarm Plot 추가)
     """
-    print(f"\n💡 {model_name} 모델 SHAP 가중치 분석 시작...")
+    print(f"\n💡 [{model_name}] SHAP 분석 시작... (잠시만 기다려주세요)")
 
-    # 파이프라인 내부의 스케일러로 변환
     X_test_scaled = model.named_steps['scaler'].transform(X_test)
     X_test_scaled_df = pd.DataFrame(X_test_scaled, columns=X_test.columns)
+    clf = model.named_steps['clf']
 
-    # 모델별 Explainer 선택
     try:
+        # Explainer 설정 (동일)
         if model_name in ['RF', 'DT', 'XGBoost', 'LightGBM', 'CatBoost', 'AdaBoost']:
-            explainer = shap.TreeExplainer(model.named_steps['clf'])
-            shap_values = explainer.shap_values(X_test_scaled_df)
+            explainer = shap.TreeExplainer(clf)
+            shap_values = explainer.shap_values(X_test_scaled_df, check_additivity=False)
         elif model_name == 'LR':
-            explainer = shap.LinearExplainer(model.named_steps['clf'], X_test_scaled_df)
+            explainer = shap.LinearExplainer(clf, X_test_scaled_df)
             shap_values = explainer.shap_values(X_test_scaled_df)
         else:
-            # 속도를 위해 50개 샘플만 사용
-            explainer = shap.KernelExplainer(model.named_steps['clf'].predict_proba, shap.sample(X_test_scaled_df, 50))
-            shap_values = explainer.shap_values(shap.sample(X_test_scaled_df, 50))
-            X_test_scaled_df = shap.sample(X_test_scaled_df, 50)
+            sample_data = shap.sample(X_test_scaled_df, 30)
+            explainer = shap.KernelExplainer(clf.predict_proba, sample_data)
+            shap_values = explainer.shap_values(sample_data)
+            X_test_scaled_df = sample_data
 
-        # 결과 차원 보정
+        # 데이터 차원 정리
         if isinstance(shap_values, list):
-            shap_to_plot = shap_values[1]
+            shap_to_plot = shap_values[1] if len(shap_values) > 1 else shap_values[0]
         elif len(shap_values.shape) == 3:
             shap_to_plot = shap_values[:, :, 1]
         else:
             shap_to_plot = shap_values
 
-        plt.figure(figsize=(10, 6))
-        shap.summary_plot(shap_to_plot, X_test_scaled_df, plot_type="bar", show=False)
-        plt.title(f"Feature Importance (SHAP) - {model_name}")
+        # -------------------------------------------------------
+        # ✨ [수정] Beeswarm Plot 출력 (빨간/파란 점 그래프)
+        # -------------------------------------------------------
+        print(f"   - SHAP Beeswarm Plot 생성 중...")
+        plt.figure(figsize=(12, 8))
+
+        # plot_type을 지정하지 않거나 "dot"으로 설정하면 점 그래프가 나옵니다.
+        # X_test_scaled_df를 같이 넣어줘야 변수값에 따른 색상(Red/Blue)이 표시됩니다.
+        shap.summary_plot(shap_to_plot, X_test_scaled_df, show=False)
+
+        plt.title(f"SHAP Summary (Beeswarm) - {model_name}", fontsize=15)
+        plt.tight_layout()
         plt.show()
+
+        # 원하신다면 막대 그래프도 별도로 하나 더 찍어볼 수 있습니다.
+        plt.figure(figsize=(12, 8))
+        shap.summary_plot(shap_to_plot, X_test_scaled_df, plot_type="bar", show=False)
+        plt.show()
+
+        print(f"✅ [{model_name}] SHAP 시각화 성공!")
+
     except Exception as e:
-        print(f"⚠️ SHAP 분석 중 오류 발생: {e}")
+        print(f"❌ SHAP 분석 중 오류 발생: {e}")
 
 
 # ==========================================
 # ⚙️ 메인 실행 설정 (사용자 맞춤 수정 가능)
 # ==========================================
 # 1. 파일 및 컬럼 설정
-DATA_PATH = 'mimic_ver_1_0.csv'
+DATA_PATH = 'mimic_ver_1.0.csv'
 EXT_PATH = 'external_mimic_test.csv'  # 외부 파일이 있을 경우 지정
 EXCLUDE_LIST = ['subject_id', 'hadm_id', 'stay_id']
 TARGET_COL = 'outcome_icu_exit_3d'
 
 # 2. 실행 모델 선택 (원하는 모델만 리스트에 넣으세요. 전부 실행하려면 None)
 MY_MODELS = ['LR', 'RF', 'DT', 'KNN', 'MLP', 'AdaBoost', 'SVM', 'XGBoost', 'LightGBM', 'CatBoost']
-# MY_MODELS = ['XGBoost', 'LightGBM']
+# MY_MODELS = ['LightGBM']
 
 # 3. 옵션 제어
 USE_EXTERNAL = False  # 외부 검증 수행 여부
