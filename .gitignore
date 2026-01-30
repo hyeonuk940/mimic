@@ -4,6 +4,7 @@
 *.R
 *.xlsx
 *.txt
+!requirements.txt
 *.Rproj
 
 .idea/
