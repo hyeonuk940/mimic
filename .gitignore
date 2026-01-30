@@ -1,0 +1,15 @@
+*.csv
+*.pkl
+*.png
+*.R
+*.xlsx
+*.txt
+*.Rproj
+
+.idea/
+__pycache__/
+
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
